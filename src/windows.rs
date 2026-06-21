@@ -263,8 +263,9 @@ impl<R: Runtime> Iap<R> {
             "inapp" => vec![
                 HSTRING::from("Consumable"),
                 HSTRING::from("UnmanagedConsumable"),
+                HSTRING::from("Durable"), // non-consumable (lifetime) add-ons are Durable in Windows Store
             ],
-            "subs" => vec![HSTRING::from("Subscription"), HSTRING::from("Durable")],
+            "subs" => vec![HSTRING::from("Subscription")],
             _ => vec![
                 HSTRING::from("Consumable"),
                 HSTRING::from("UnmanagedConsumable"),
