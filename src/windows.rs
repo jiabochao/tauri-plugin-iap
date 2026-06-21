@@ -265,7 +265,10 @@ impl<R: Runtime> Iap<R> {
                 HSTRING::from("UnmanagedConsumable"),
                 HSTRING::from("Durable"), // non-consumable (lifetime) add-ons are Durable in Windows Store
             ],
-            "subs" => vec![HSTRING::from("Subscription")],
+            "subs" => vec![
+                HSTRING::from("Subscription"),
+                HSTRING::from("Durable"), // some subscription add-ons may be configured as Durable with expiration
+            ],
             _ => vec![
                 HSTRING::from("Consumable"),
                 HSTRING::from("UnmanagedConsumable"),
