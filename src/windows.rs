@@ -10,8 +10,8 @@ use windows::core::{HSTRING, Interface};
 use windows::{
     Foundation::DateTime,
     Services::Store::{
-        StoreConsumableStatus, StoreContext, StoreDurationUnit, StoreLicense, StoreProduct,
-        StorePurchaseProperties, StorePurchaseStatus,
+        StoreConsumableStatus, StoreContext, StoreDurationUnit, StoreLicense, StorePrice,
+        StoreProduct, StorePurchaseProperties, StorePurchaseStatus,
     },
     Win32::UI::Shell::IInitializeWithWindow,
 };
@@ -46,6 +46,24 @@ fn formatted_price_to_micros(formatted: &str) -> i64 {
         .collect();
     let value: f64 = numeric.parse().unwrap_or(0.0);
     (value * 1_000_000.0) as i64
+}
+
+/// Resolve the *recurring* subscription charge from a Microsoft Store price.
+///
+/// Microsoft reports the currently-acquirable price in `FormattedPrice` and
+/// `FormattedBasePrice`; both read as `$0` ("Free") while the customer is
+/// eligible for a free trial, so relying on them mislabels the recurring price
+/// as free once a trial is configured. The real post-trial price lives in
+/// `FormattedRecurrencePrice`, which the Store populates for subscriptions with
+/// recurring billing. Fall back to the base price only when no recurrence price
+/// is published (e.g. one-time products).
+fn recurring_formatted_price(price: &StorePrice) -> windows::core::Result<String> {
+    let recurrence = price.FormattedRecurrencePrice()?.to_string();
+    if recurrence.trim().is_empty() {
+        Ok(price.FormattedBasePrice()?.to_string())
+    } else {
+        Ok(recurrence)
+    }
 }
 
 /// Render a Microsoft Store duration (value + `StoreDurationUnit`) as an
@@ -263,7 +281,7 @@ impl<R: Runtime> Iap<R> {
             "inapp" => vec![
                 HSTRING::from("Consumable"),
                 HSTRING::from("UnmanagedConsumable"),
-                HSTRING::from("Durable"), // non-consumable (lifetime) add-ons are Durable in Windows Store
+                HSTRING::from("Durable"),
             ],
             "subs" => vec![
                 HSTRING::from("Subscription"),
@@ -338,10 +356,16 @@ impl<R: Runtime> Iap<R> {
 
         let price = store_product.Price()?;
         let currency_code = price.CurrencyCode()?.to_string();
-        // Use the base (recurring) price so the displayed string and parsed
-        // micros agree even when the customer is currently eligible for a
-        // free trial or a sale price.
-        let product_formatted_price = price.FormattedBasePrice()?.to_string();
+        // Prefer the recurring price for subscriptions so the displayed string
+        // and parsed micros reflect the real post-trial charge even when the
+        // customer is currently eligible for a free trial (during which the
+        // acquirable base/sale price is $0). One-time products have no
+        // recurrence price and fall back to the base price.
+        let product_formatted_price = if product_type == "subs" {
+            recurring_formatted_price(&price)?
+        } else {
+            price.FormattedBasePrice()?.to_string()
+        };
         let product_price_micros = formatted_price_to_micros(&product_formatted_price);
 
         // For subscriptions, walk every SKU and build a SubscriptionOffer per
@@ -365,7 +389,11 @@ impl<R: Runtime> Iap<R> {
 
                 let sku_id = sku.StoreId()?.to_string();
                 let sku_price = sku.Price()?;
-                let sku_formatted = sku_price.FormattedBasePrice()?.to_string();
+                // Recurring (post-trial) price for this subscription SKU. Using
+                // FormattedRecurrencePrice keeps the price non-zero while the
+                // customer is mid free-trial, when the base/acquirable price is
+                // reported as $0.
+                let sku_formatted = recurring_formatted_price(&sku_price)?;
                 let sku_micros = formatted_price_to_micros(&sku_formatted);
                 let sku_current_formatted = sku_price.FormattedPrice()?.to_string();
                 let sku_current_micros = formatted_price_to_micros(&sku_current_formatted);
